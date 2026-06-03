@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { BookOpen, ChevronDown, Edit3, Loader2, Search, List, CheckCircle2, XCircle } from 'lucide-vue-next'
-import type { ChapterAiToolCall } from './useChapterAi'
+import type { ChapterAiToolCall } from '@/composables/useChapterAi'
 
 const props = defineProps<{
   toolCall: ChapterAiToolCall

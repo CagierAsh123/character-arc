@@ -2,7 +2,7 @@
 import { ChevronLeft, LibraryBig } from 'lucide-vue-next'
 import { computed } from 'vue'
 import { NButton } from 'naive-ui'
-import KnowledgeCenterPanel from '@/components/KnowledgeCenterPanel.vue'
+import KnowledgeCenterPanel from '@/components/panels/KnowledgeCenterPanel.vue'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()

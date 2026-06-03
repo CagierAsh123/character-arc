@@ -7,8 +7,8 @@ import { toIpcPayload } from '@/utils/ipcPayload'
 import { buildProjectWritingStyleContext } from '@/features/writingStyles/presets'
 import type { DropdownOption } from 'naive-ui'
 import type { WorldviewEntry } from '@/types/app'
-import AiEnhancePreview from './AiEnhancePreview.vue'
-import type { EnhanceFieldDiff } from './AiEnhancePreview.vue'
+import AiEnhancePreview from '../shared/AiEnhancePreview.vue'
+import type { EnhanceFieldDiff } from '../shared/AiEnhancePreview.vue'
 
 const props = defineProps<{
   searchQuery?: string // 全局搜索关键词，用于过滤世界观词条

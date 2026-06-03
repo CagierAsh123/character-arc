@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { NButton, NCheckbox, NModal, NTag } from 'naive-ui'
-import type { DetectedThread } from './useChapterThreadDetect'
+import type { DetectedThread } from '@/composables/useChapterThreadDetect'
 
 defineProps<{
   show: boolean

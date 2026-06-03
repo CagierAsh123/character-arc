@@ -58,6 +58,10 @@ dist_embed/
 .project-skills/
 skills-lock.json
 
+# Local issue tracking / agent work files
+.scratch/
+.memory/
+
 # OS files
 .DS_Store
 Thumbs.db
@@ -82,3 +86,4 @@ ENV/
 .mypy_cache/
 .coverage
 htmlcov/
+CLAUDE.md

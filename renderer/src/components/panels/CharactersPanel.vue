@@ -6,22 +6,23 @@ import { useAppStore } from '@/stores/app'
 import { buildProjectWritingStyleContext } from '@/features/writingStyles/presets'
 import { resolveAccentColor, resolveReadableTextColor } from '@/features/relations/graph'
 import { toIpcPayload } from '@/utils/ipcPayload'
+import { usePanelSearch } from '@/composables/usePanelSearch'
 import type { CharacterCard } from '@/types/app'
 import type { DropdownOption } from 'naive-ui'
-import AiEnhancePreview from './AiEnhancePreview.vue'
-import type { EnhanceFieldDiff } from './AiEnhancePreview.vue'
+import AiEnhancePreview from '../shared/AiEnhancePreview.vue'
+import type { EnhanceFieldDiff } from '../shared/AiEnhancePreview.vue'
+
+const props = defineProps<{
+  searchQuery?: string // 全局搜索关键词，由父组件传入
+}>()
 
 const appStore = useAppStore()
 const dialog = useDialog()
-const keyword = ref('') // 本面板内的本地搜索关键词
+const { keyword, mergedQuery } = usePanelSearch(props)
 const writingStyle = computed(() => buildProjectWritingStyleContext(appStore.currentProject))
 
-// 合并本地搜索框和全局工作区搜索关键词，对角色列表进行过滤
-// 在角色名、角色定位和简介中做全文匹配
 const filteredCharacters = computed(() => {
-  // Combine the local search box with the global workspace search for a simple, predictable filter model.
-  const mergedQuery = [props.searchQuery, keyword.value].filter(Boolean).join(' ').trim().toLowerCase()
-  const value = mergedQuery
+  const value = mergedQuery.value
   if (!value) {
     return appStore.characters
   }
@@ -32,9 +33,6 @@ const filteredCharacters = computed(() => {
   })
 })
 
-const props = defineProps<{
-  searchQuery?: string // 全局搜索关键词，由父组件传入
-}>()
 const message = useMessage()
 const AI_TASK_KEY = 'character-card'
 const isGenerating = computed(() => appStore.isAiTaskRunning(AI_TASK_KEY)) // AI 生成角色时的加载状态（走全局注册表）

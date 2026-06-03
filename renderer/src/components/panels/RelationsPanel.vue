@@ -15,14 +15,15 @@ import {
   Users
 } from 'lucide-vue-next'
 import { NButton, NDynamicTags, NForm, NFormItem, NInput, NModal, NSelect, NSlider, useDialog, useMessage } from 'naive-ui'
-import RelationsGraphView from '@/components/RelationsGraphView.vue'
+import RelationsGraphView from '@/components/panels/RelationsGraphView.vue'
 import { buildRelationsGraphData } from '@/features/relations/graph'
 import { buildProjectWritingStyleContext } from '@/features/writingStyles/presets'
 import { useAppStore } from '@/stores/app'
 import { toIpcPayload } from '@/utils/ipcPayload'
+import { usePanelSearch } from '@/composables/usePanelSearch'
 import type { CharacterCard, CharacterRelationship, OrganizationEntry, OrganizationMembership } from '@/types/app'
-import AiEnhancePreview from './AiEnhancePreview.vue'
-import type { EnhanceFieldDiff } from './AiEnhancePreview.vue'
+import AiEnhancePreview from '../shared/AiEnhancePreview.vue'
+import type { EnhanceFieldDiff } from '../shared/AiEnhancePreview.vue'
 
 const props = defineProps<{
   searchQuery?: string // 全局搜索关键词
@@ -31,7 +32,7 @@ const props = defineProps<{
 const appStore = useAppStore()
 const message = useMessage()
 const dialog = useDialog()
-const keyword = ref('') // 本面板内的本地搜索关键词
+const { keyword, mergedQuery } = usePanelSearch(props)
 const viewMode = ref<'list' | 'graph'>('list')
 
 // --- 角色编辑器状态 ---
@@ -76,8 +77,6 @@ const membershipForm = reactive({ // 成员归属表单：将角色绑定到组�
   notes: ''
 })
 
-// 合并全局搜索和本地搜索关键词
-const mergedQuery = computed(() => [props.searchQuery, keyword.value].filter(Boolean).join(' ').trim().toLowerCase())
 // 角色选项列表，用于下拉选择器
 const characterOptions = computed(() =>
   appStore.characters.map((character) => ({

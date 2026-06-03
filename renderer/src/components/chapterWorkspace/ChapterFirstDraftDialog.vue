@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { NButton, NModal, NTag } from 'naive-ui'
-import type { ChapterAuditPayload } from './useChapterFirstDraft'
+import type { ChapterAuditPayload } from '@/composables/useChapterFirstDraft'
 
 const props = defineProps<{
   show: boolean

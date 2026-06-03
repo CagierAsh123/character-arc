@@ -10,8 +10,8 @@ import ChapterStudioPage from '@/pages/ChapterStudioPage.vue'
 import DeconstructionLibraryPage from '@/pages/DeconstructionLibraryPage.vue'
 import SkillsPage from '@/pages/SkillsPage.vue'
 import CoverWorkbenchPage from '@/pages/CoverWorkbenchPage.vue'
-import AiTaskProgressDock from '@/components/AiTaskProgressDock.vue'
-import TitlebarModelSwitcher from '@/components/TitlebarModelSwitcher.vue'
+import AiTaskProgressDock from '@/components/shared/AiTaskProgressDock.vue'
+import TitlebarModelSwitcher from '@/components/shared/TitlebarModelSwitcher.vue'
 
 // 全局应用状态
 const appStore = useAppStore()

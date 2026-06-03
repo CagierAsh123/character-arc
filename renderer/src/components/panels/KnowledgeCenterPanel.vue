@@ -28,7 +28,7 @@ import {
   type ReferenceAssetLibrary
 } from '@/features/knowledge/knowledgeCenter'
 import { useAppStore } from '@/stores/app'
-import BatchImportModal from './BatchImportModal.vue'
+import BatchImportModal from '../shared/BatchImportModal.vue'
 
 const appStore = useAppStore()
 const dialog = useDialog()

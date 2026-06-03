@@ -113,6 +113,18 @@ CharacterArc（弧光）不是"只会对话的 AI 壳子"，而是一套围绕�
 </details>
 
 <details open>
+<summary><b>💬 全局 AI 助手侧边栏</b></summary>
+
+- **跨面板对话**：在工作台的任何面板（大纲、角色、世界观等）中打开 AI 助手，与 AI 进行多轮对话
+- **上下文感知**：自动注入当前面板的完整数据和全项目摘要，AI 始终了解你的创作全貌
+- **工具系统**：24 个跨面板工具，AI 可读取/创建/修改/删除大纲、角色、世界观、灵感、线索、组织、关系等实体
+- **变更确认**：AI 的写操作以 diff 卡片呈现，支持逐项接受/拒绝，拒绝自动追回对话
+- **会话管理**：按项目自动保存/恢复对话，支持新建对话、历史会话切换、会话删除，每项目最多 100 个会话
+- **流式生成**：接入 AI SDK 流式调用，支持中途停止，500k 字符上下文窗口
+
+</details>
+
+<details open>
 <summary><b>🎨 封面工作台</b></summary>
 
 - 面向平台（番茄、起点、晋江、知乎盐言、七猫、刺猬猫等）生成封面 Prompt
@@ -197,8 +209,37 @@ pnpm run dev
 # 类型检查 + 构建
 pnpm run build
 
-# 打包 Windows 安装程序
+# 打包 Windows 安装程序（国内环境需先设置镜像）
+# export ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/
+# export ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/
+# export CSC_IDENTITY_AUTO_DISCOVERY=false
 pnpm run dist
+```
+
+## 🏗️ 项目结构（2026.06 重构后）
+
+```
+renderer/src/
+├── stores/           ← 13 个领域 store（拆自原 2571 行 God Object）
+│   ├── app.ts        ← 协调器（437 行）
+│   ├── projectCrud.ts / chapterCrud.ts / outlineCrud.ts / ...
+│   └── helpers.ts    ← 工具函数
+├── composables/      ← 7 个组合函数（从 components/ 提取）
+│   ├── useGlobalAi.ts / useGlobalAiContext.ts / useGlobalAiTools.ts
+│   └── useChapter*.ts
+├── components/
+│   ├── panels/       ← 14 个面板组件
+│   ├── shared/       ← 5 个共享组件
+│   ├── chapterWorkspace/  ← 章节编辑组件
+│   └── home/         ← 首页组件
+└── types/
+    └── electron.d.ts ← 从 env.d.ts 搬迁
+
+electron/main/ai/
+├── tasks/            ← 32 个 AI 任务处理器（含 global-assistant）
+├── agent/            ← Agent Loop 编排引擎
+├── runtime/          ← 运行时调度
+└── prompts/          ← Prompt 构建
 ```
 
 ### 🔑 配置 AI

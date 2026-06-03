@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ChevronLeft } from 'lucide-vue-next'
 import { NButton } from 'naive-ui'
-import ProjectSkillsPanel from '@/components/ProjectSkillsPanel.vue'
+import ProjectSkillsPanel from '@/components/panels/ProjectSkillsPanel.vue'
 import { useAppStore } from '@/stores/app'
 
 const appStore = useAppStore()

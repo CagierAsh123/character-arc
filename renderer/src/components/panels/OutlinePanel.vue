@@ -10,8 +10,8 @@ import { formatVolumeLabel } from '@/features/workspace/outlineVolumes'
 import { toIpcPayload } from '@/utils/ipcPayload'
 import type { DropdownOption, SelectOption } from 'naive-ui'
 import type { OutlineItem, OutlineItemStatus, OutlineVolume } from '@/types/app'
-import AiEnhancePreview from './AiEnhancePreview.vue'
-import type { EnhanceFieldDiff } from './AiEnhancePreview.vue'
+import AiEnhancePreview from '../shared/AiEnhancePreview.vue'
+import type { EnhanceFieldDiff } from '../shared/AiEnhancePreview.vue'
 
 const props = defineProps<{
   searchQuery?: string // 全局搜索关键词

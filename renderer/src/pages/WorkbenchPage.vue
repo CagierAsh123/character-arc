@@ -14,29 +14,37 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
+  Sparkles,
   Users,
   GitMerge
 } from 'lucide-vue-next'
 import { NInput } from 'naive-ui'
 import { resolveNovelLengthLabel } from '@/features/wizard/projectGenres'
 import { useAppStore } from '@/stores/app'
-import NovelWorkflowPanel from '@/components/NovelWorkflowPanel.vue'
-import OverviewPanel from '@/components/OverviewPanel.vue'
-import ProjectKnowledgePanel from '@/components/ProjectKnowledgePanel.vue'
-import WorldviewPanel from '@/components/WorldviewPanel.vue'
-import CharactersPanel from '@/components/CharactersPanel.vue'
-import RelationsPanel from '@/components/RelationsPanel.vue'
-import InspirationPanel from '@/components/InspirationPanel.vue'
-import OutlinePanel from '@/components/OutlinePanel.vue'
-import PlotThreadsPanel from '@/components/PlotThreadsPanel.vue'
-import SettingsPanel from '@/components/SettingsPanel.vue'
-import SearchResultsPanel from '@/components/SearchResultsPanel.vue'
+import NovelWorkflowPanel from '@/components/panels/NovelWorkflowPanel.vue'
+import OverviewPanel from '@/components/panels/OverviewPanel.vue'
+import ProjectKnowledgePanel from '@/components/panels/ProjectKnowledgePanel.vue'
+import WorldviewPanel from '@/components/panels/WorldviewPanel.vue'
+import CharactersPanel from '@/components/panels/CharactersPanel.vue'
+import RelationsPanel from '@/components/panels/RelationsPanel.vue'
+import InspirationPanel from '@/components/panels/InspirationPanel.vue'
+import OutlinePanel from '@/components/panels/OutlinePanel.vue'
+import PlotThreadsPanel from '@/components/panels/PlotThreadsPanel.vue'
+import SettingsPanel from '@/components/panels/SettingsPanel.vue'
+import SearchResultsPanel from '@/components/panels/SearchResultsPanel.vue'
+import GlobalAiPanel from '@/components/panels/GlobalAiPanel.vue'
 import type { PanelName } from '@/types/app'
 
 const appStore = useAppStore()
 
 // 侧边栏展开/收起状态
 const isSidebarOpen = ref(true)
+// AI 助手侧边栏状态
+const isAiSidebarOpen = ref(false)
+const aiSidebarWidth = ref(380)
+const isDraggingAiSidebar = ref(false)
+const AI_SIDEBAR_MIN_WIDTH = 280
+const AI_SIDEBAR_MAX_WIDTH = 600
 // 当前视口宽度，用于响应式判断侧边栏模式
 const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
 
@@ -169,6 +177,36 @@ function openSearchResult(payload: { panel: PanelName; chapterId?: string }): vo
   appStore.setPanel(payload.panel)
 }
 
+function toggleAiSidebar(): void {
+  isAiSidebarOpen.value = !isAiSidebarOpen.value
+}
+
+function startAiSidebarDrag(e: MouseEvent): void {
+  e.preventDefault()
+  isDraggingAiSidebar.value = true
+  const startX = e.clientX
+  const startWidth = aiSidebarWidth.value
+  document.body.style.userSelect = 'none'
+  document.body.style.cursor = 'col-resize'
+
+  function onMove(ev: MouseEvent): void {
+    const delta = startX - ev.clientX
+    const nextWidth = Math.min(AI_SIDEBAR_MAX_WIDTH, Math.max(AI_SIDEBAR_MIN_WIDTH, startWidth + delta))
+    aiSidebarWidth.value = nextWidth
+  }
+
+  function onUp(): void {
+    isDraggingAiSidebar.value = false
+    document.body.style.userSelect = ''
+    document.body.style.cursor = ''
+    document.removeEventListener('mousemove', onMove)
+    document.removeEventListener('mouseup', onUp)
+  }
+
+  document.addEventListener('mousemove', onMove)
+  document.addEventListener('mouseup', onUp)
+}
+
 /** 同步视口宽度，窄屏下自动收起侧边栏 */
 function syncViewportState(): void {
   viewportWidth.value = window.innerWidth
@@ -286,6 +324,15 @@ watch(searchKeyword, (value) => {
         </div>
 
         <div class="header-tools">
+            <button
+              type="button"
+              class="ai-sidebar-toggle"
+              :class="{ active: isAiSidebarOpen }"
+              :title="isAiSidebarOpen ? '关闭 AI 助手' : '打开 AI 助手'"
+              @click="toggleAiSidebar"
+            >
+              <Sparkles :size="16" />
+            </button>
             <n-input
               v-model:value="searchKeyword"
               class="search-input"
@@ -323,6 +370,19 @@ watch(searchKeyword, (value) => {
         </Transition>
       </div>
     </main>
+
+    <!-- AI 助手侧边栏 -->
+    <aside
+      v-if="isAiSidebarOpen"
+      class="ai-sidebar"
+      :class="{ dragging: isDraggingAiSidebar }"
+      :style="{ width: `${aiSidebarWidth}px` }"
+    >
+      <div class="ai-sidebar-drag-handle" @mousedown="startAiSidebarDrag" />
+      <div class="ai-sidebar-body">
+        <GlobalAiPanel :panel-label="activeViewLabel" :panel-id="appStore.activePanel" @close="toggleAiSidebar" />
+      </div>
+    </aside>
   </section>
 </template>
 
@@ -794,6 +854,173 @@ watch(searchKeyword, (value) => {
 
   .workspace-body {
     padding: 14px;
+  }
+}
+
+/* ── AI 助手侧边栏 ── */
+.ai-sidebar-toggle {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--arc-border);
+  border-radius: var(--arc-radius-md);
+  background: var(--arc-bg-surface);
+  color: var(--arc-text-hint);
+  cursor: pointer;
+  transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+
+.ai-sidebar-toggle:hover {
+  border-color: color-mix(in srgb, var(--arc-primary) 40%, var(--arc-border));
+  color: var(--arc-primary);
+}
+
+.ai-sidebar-toggle.active {
+  border-color: var(--arc-primary);
+  background: color-mix(in srgb, var(--arc-primary) 10%, transparent);
+  color: var(--arc-primary);
+}
+
+.ai-sidebar {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  position: relative;
+  border-left: 1px solid var(--arc-sidebar-border);
+  background: var(--arc-bg-sidebar);
+  transition: width 0.22s ease;
+  min-width: 0;
+}
+
+.ai-sidebar.dragging {
+  transition: none;
+}
+
+.ai-sidebar-drag-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 5;
+}
+
+.ai-sidebar-drag-handle:hover,
+.ai-sidebar.dragging .ai-sidebar-drag-handle {
+  background: color-mix(in srgb, var(--arc-primary) 20%, transparent);
+}
+
+.ai-sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  padding: calc(var(--arc-titlebar-height) + 10px) 14px 10px;
+  border-bottom: 1px solid var(--arc-sidebar-border);
+  gap: 8px;
+}
+
+.ai-sidebar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--arc-text-primary);
+  min-width: 0;
+}
+
+.ai-sidebar-title-icon {
+  color: var(--arc-primary);
+  flex-shrink: 0;
+}
+
+.ai-sidebar-close {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: var(--arc-radius-md);
+  background: transparent;
+  color: var(--arc-text-hint);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+
+.ai-sidebar-close:hover {
+  background: var(--arc-bg-surface);
+  color: var(--arc-text-primary);
+}
+
+.ai-sidebar-body {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+  padding: 16px;
+}
+
+.ai-sidebar-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  text-align: center;
+  gap: 8px;
+  padding: 24px;
+}
+
+.ai-sidebar-placeholder-icon {
+  color: var(--arc-text-hint);
+  opacity: 0.3;
+}
+
+.ai-sidebar-placeholder-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--arc-text-hint);
+  margin: 0;
+}
+
+.ai-sidebar-placeholder-hint {
+  font-size: 12px;
+  color: var(--arc-text-hint);
+  opacity: 0.6;
+  margin: 0;
+  max-width: 240px;
+  line-height: 1.5;
+}
+
+/* ── Narrow screen AI sidebar (bottom drawer) ── */
+@media (max-width: 960px) {
+  .ai-sidebar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    width: 100% !important;
+    height: 45vh;
+    z-index: 100;
+    border-left: none;
+    border-top: 1px solid var(--arc-border);
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
+  }
+
+  .ai-sidebar-drag-handle {
+    top: 0;
+    left: 0;
+    right: 0;
+    width: 100%;
+    height: 4px;
+    cursor: row-resize;
   }
 }
 </style>

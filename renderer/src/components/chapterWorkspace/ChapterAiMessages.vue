@@ -13,7 +13,7 @@ import xml from 'highlight.js/lib/languages/xml'
 import css from 'highlight.js/lib/languages/css'
 import markdown from 'highlight.js/lib/languages/markdown'
 import ChapterAiToolCard from './ChapterAiToolCard.vue'
-import type { ChapterAiMessage } from './useChapterAi'
+import type { ChapterAiMessage } from '@/composables/useChapterAi'
 import { useAppStore } from '@/stores/app'
 
 // Register highlight.js languages
