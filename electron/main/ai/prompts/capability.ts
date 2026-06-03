@@ -60,7 +60,8 @@ const TASK_DEFAULT_CAPABILITIES: Record<AiTaskName, PromptCapabilityId[]> = {
   'worldview-enhance': ['settings', 'worldview', 'characters', 'writing-style'],
   'outline-enhance': ['settings', 'outline', 'worldview', 'characters', 'writing-style'],
   'relation-enhance': ['settings', 'characters', 'relations', 'worldview', 'writing-style'],
-  'global-assistant': ['settings', 'worldview', 'characters', 'relations', 'outline', 'inspiration', 'writing-style', 'project-skills']
+  'global-assistant': ['settings', 'worldview', 'characters', 'relations', 'outline', 'inspiration', 'writing-style', 'project-skills', 'workflow', 'analysis', 'versioning'],
+  'global-assistant-proposal': ['settings', 'worldview', 'characters', 'relations', 'outline', 'inspiration', 'writing-style', 'project-skills', 'workflow', 'analysis', 'versioning']
 }
 
 /**

@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { ArrowUp, History, Loader2, Plus, Sparkles, Square, Trash2, X } from 'lucide-vue-next'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { ArrowUp, ChevronDown, History, Loader2, Plus, Sparkles, Square, Trash2, X } from 'lucide-vue-next'
 import { NTooltip } from 'naive-ui'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 import { useGlobalAi } from '@/composables/useGlobalAi'
 import { useGlobalAiContext } from '@/composables/useGlobalAiContext'
 import { useAppStore } from '@/stores/app'
@@ -14,31 +16,42 @@ const props = defineProps<{
 defineEmits<{ close: [] }>()
 
 const appStore = useAppStore()
-const { messages, isResponding, send, stop, applyChange, rejectChange, applyAllChanges, getChangeStatus, loadSession, newSession, switchToSession, listSessions, deleteSession, currentSessionId } = useGlobalAi()
+const { messages, isResponding, agentStatus, send, stop, applyChange, rejectChange, applyAllChanges, getChangeStatus, loadSession, newSession, switchToSession, refreshSessions, saveCurrentSession, deleteSession, currentSessionId, sessions } = useGlobalAi()
 const { buildSystemPrompt } = useGlobalAiContext(computed(() => props.panelId))
 
 const showSessionList = ref(false)
+const expandedTools = reactive<Record<string, boolean>>({})
+const showInfo = ref(false)
+
+function toggleTool(id: string): void { expandedTools[id] = !expandedTools[id] }
+
+function renderMarkdown(text: string): string {
+  if (!text) return ''
+  return DOMPurify.sanitize(marked.parse(text, { breaks: true }) as string)
+}
 
 // Load session on mount and on project switch
-onMounted(() => loadSession())
-watch(() => appStore.selectedProjectId, () => { showSessionList.value = false; loadSession() })
+onMounted(async () => { await loadSession(); await refreshSessions() })
+watch(() => appStore.selectedProjectId, async () => { showSessionList.value = false; await saveCurrentSession(); await loadSession(); await refreshSessions() })
 
-function handleNewSession(): void {
+async function handleNewSession(): Promise<void> {
   if (isResponding.value) return
+  await saveCurrentSession()
   newSession()
   showSessionList.value = false
 }
 
-function handleLoadSession(sessionId: string): void {
-  switchToSession(sessionId)
+async function handleLoadSession(sessionId: string): Promise<void> {
+  await saveCurrentSession()
+  await switchToSession(sessionId)
   showSessionList.value = false
 }
 
-function handleDeleteSession(sessionId: string): void {
-  deleteSession(sessionId)
+async function handleDeleteSession(sessionId: string): Promise<void> {
+  await deleteSession(sessionId)
 }
 
-const sessionList = computed(() => listSessions())
+const sessionList = computed(() => sessions.value)
 const inputValue = ref('')
 const messageListRef = ref<HTMLElement | null>(null)
 
@@ -172,20 +185,22 @@ function formatToolName(name: string): string { return TOOL_LABELS[name] || name
             <span class="gai-message-role">{{ msg.role === 'assistant' ? 'AI 助手' : '你' }}</span>
             <span class="gai-message-time">{{ formatTime(msg.createdAt) }}</span>
           </div>
-          <div class="gai-message-content" :class="{ error: msg.isError }">
-            <template v-if="msg.content">{{ msg.content }}</template>
-            <template v-else-if="isResponding && msg.role === 'assistant'">
-              <span class="gai-cursor">|</span>
-            </template>
-          </div>
-          <!-- Tool call cards -->
+          <div class="gai-message-content" :class="{ error: msg.isError }" v-html="renderMarkdown(msg.content)"></div>
+          <span v-if="isResponding && msg.role === 'assistant' && !msg.content" class="gai-cursor">|</span>
+          <!-- Collapsible tool call cards -->
           <div v-if="msg.toolCalls?.length" class="gai-tool-calls">
-            <div v-for="tc in msg.toolCalls" :key="tc.call.id" class="gai-tool-card" :class="{ success: tc.result.success, error: !tc.result.success }">
-              <div class="gai-tool-card-header">
+            <div
+              v-for="tc in msg.toolCalls"
+              :key="tc.call.id"
+              class="gai-tool-card"
+              :class="[tc.result.success ? 'success' : 'error', { expanded: expandedTools[tc.call.id] }]"
+            >
+              <div class="gai-tool-card-header" @click="toggleTool(tc.call.id)">
                 <span class="gai-tool-card-name">{{ formatToolName(tc.call.name) }}</span>
-                <span class="gai-tool-card-status">{{ tc.result.success ? '✓' : '✗' }}</span>
+                <span class="gai-tool-card-status" :class="{ running: tc.result.data === '执行中...' }">{{ tc.result.data === '执行中...' ? '⟳' : tc.result.success ? '✓' : '✗' }}</span>
+                <ChevronDown v-if="tc.result.data" :size="12" class="gai-tool-chevron" />
               </div>
-              <div v-if="tc.result.success && isReadTool(tc.call.name)" class="gai-tool-card-body">
+              <div v-if="expandedTools[tc.call.id] && tc.result.success && isReadTool(tc.call.name)" class="gai-tool-card-body">
                 <div v-if="Array.isArray(tc.result.data) && tc.result.data.length === 0" class="gai-tool-empty">（空）</div>
                 <div v-else-if="Array.isArray(tc.result.data)" class="gai-tool-list">
                   <div v-for="(item, i) in tc.result.data" :key="i" class="gai-tool-list-item">
@@ -271,6 +286,12 @@ function formatToolName(name: string): string { return TOOL_LABELS[name] || name
           {{ prompt }}
         </button>
       </div>
+    </div>
+
+    <!-- Agent status bar -->
+    <div v-if="agentStatus" class="gai-agent-status">
+      <span class="gai-agent-pulse" />
+      <span>{{ agentStatus }}</span>
     </div>
 
     <!-- Input -->
@@ -600,6 +621,33 @@ function formatToolName(name: string): string { return TOOL_LABELS[name] || name
 }
 
 /* ── Input ── */
+/* ── Agent Status ── */
+.gai-agent-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 6px 14px;
+  font-size: 12px;
+  color: var(--arc-text-secondary);
+  border-top: 1px solid var(--arc-sidebar-border);
+}
+
+.gai-agent-pulse {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--arc-primary);
+  animation: gai-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes gai-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+/* ── Input ── */
 .gai-input-area {
   flex-shrink: 0;
   padding: 10px 14px 14px;
@@ -710,6 +758,28 @@ function formatToolName(name: string): string { return TOOL_LABELS[name] || name
   justify-content: space-between;
   padding: 6px 10px;
   background: color-mix(in srgb, var(--arc-primary) 4%, transparent);
+  cursor: pointer;
+  user-select: none;
+  gap: 6px;
+}
+
+.gai-tool-card-header:hover {
+  background: color-mix(in srgb, var(--arc-primary) 8%, transparent);
+}
+
+.gai-tool-card .gai-tool-card-status.running {
+  color: #f59e0b;
+  animation: gai-pulse 1.2s ease-in-out infinite;
+}
+
+.gai-tool-chevron {
+  flex-shrink: 0;
+  color: var(--arc-text-hint);
+  transition: transform 0.2s ease;
+}
+
+.gai-tool-card.expanded .gai-tool-chevron {
+  transform: rotate(180deg);
 }
 
 .gai-tool-card-name {

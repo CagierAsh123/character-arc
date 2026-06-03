@@ -1,8 +1,9 @@
-import { ipcMain } from 'electron'
+import { BrowserWindow, ipcMain } from 'electron'
 import { randomUUID } from 'node:crypto'
 import type { AiTaskPayload, AppSettings, ChapterPostGenerationIssuesPayload, ChapterStateWarningsPayload } from './shared-types'
 import { runAiTask, streamAiTask, testAiConnection, fetchModels, fetchImageModels, generateImage } from './runtime'
 import { runStreamingAgentTask } from './agent/streaming-orchestrator'
+import { runAgent } from './agent/run-agent'
 import { providerSupportsTools } from './provider'
 import { setChapterPostGenerationIssuesEmitter, setChapterWarningsEmitter } from './runtime/orchestrator'
 import { retrieveKnowledgeContext } from './knowledge-retrieval'
@@ -32,6 +33,86 @@ let deps: AiIpcDeps | null = null
 
 /** 流式任务的 AbortController（按 streamId 索引） */
 const activeAiStreams = new Map<string, AbortController>()
+
+/** 等待渲染侧回传结果的代理工具调用（按 toolUseId 索引） */
+const pendingToolCalls = new Map<string, { resolve: (result: unknown) => void; reject: (err: Error) => void }>()
+
+/** 创建将工具调用委托给渲染侧的代理工具集 */
+export function createDelegatingTools(streamId: string): Array<import('./agent/tools/types').Tool> {
+  const TOOL_DEFS: Array<{ name: string; description: string; params: Record<string, { type: string; description: string }> }> = [
+    { name: 'list_characters', description: '列出所有角色（名称+ID+定位）', params: {} },
+    { name: 'list_worldview', description: '列出所有世界观条目（标题+类型+ID）', params: {} },
+    { name: 'list_outline', description: '列出所有大纲节点（标题+ID+所属分卷+状态）', params: {} },
+    { name: 'list_inspirations', description: '列出所有灵感卡片（标题+类型+ID）', params: {} },
+    { name: 'list_plot_threads', description: '列出所有剧情线索（标题+状态+ID）', params: {} },
+    { name: 'list_organizations', description: '列出所有组织（名称+类型+ID）', params: {} },
+    { name: 'list_relationships', description: '列出所有角色关系', params: {} },
+    { name: 'read_entity', description: '读取任意实体的完整详情', params: { entityType: { type: 'string', description: '实体类型: character/worldview/outline/inspiration/thread/organization/relationship' }, entityId: { type: 'string', description: '实体 ID' } } },
+    { name: 'create_character', description: '创建新角色（需用户确认）', params: { name: { type: 'string', description: '角色名' }, role: { type: 'string', description: '角色定位' }, description: { type: 'string', description: '角色描述' }, tags: { type: 'string', description: '标签，逗号分隔' } } },
+    { name: 'update_character', description: '修改角色（需用户确认）', params: { entityId: { type: 'string', description: '角色ID' }, name: { type: 'string', description: '新名称' }, role: { type: 'string', description: '新定位' }, description: { type: 'string', description: '新描述' } } },
+    { name: 'delete_character', description: '删除角色（需用户确认）', params: { entityId: { type: 'string', description: '角色ID' } } },
+    { name: 'create_worldview', description: '创建世界观条目（需用户确认）', params: { type: { type: 'string', description: '类型' }, title: { type: 'string', description: '标题' }, content: { type: 'string', description: '内容' } } },
+    { name: 'update_worldview', description: '修改世界观条目（需用户确认）', params: { entityId: { type: 'string', description: '条目ID' }, title: { type: 'string', description: '新标题' }, content: { type: 'string', description: '新内容' } } },
+    { name: 'delete_worldview', description: '删除世界观条目（需用户确认）', params: { entityId: { type: 'string', description: '条目ID' } } },
+    { name: 'create_outline', description: '创建大纲节点（需用户确认）', params: { volumeId: { type: 'string', description: '分卷ID' }, title: { type: 'string', description: '标题' }, conflict: { type: 'string', description: '冲突' }, summary: { type: 'string', description: '摘要' } } },
+    { name: 'update_outline', description: '修改大纲节点（需用户确认）', params: { entityId: { type: 'string', description: '节点ID' }, title: { type: 'string', description: '新标题' }, summary: { type: 'string', description: '新摘要' } } },
+    { name: 'delete_outline', description: '删除大纲节点（需用户确认）', params: { entityId: { type: 'string', description: '节点ID' } } },
+    { name: 'create_inspiration', description: '创建灵感卡片（需用户确认）', params: { type: { type: 'string', description: '类型' }, title: { type: 'string', description: '标题' }, content: { type: 'string', description: '内容' } } },
+    { name: 'create_thread', description: '创建剧情线索（需用户确认）', params: { title: { type: 'string', description: '标题' }, description: { type: 'string', description: '描述' } } },
+    { name: 'create_organization', description: '创建组织（需用户确认）', params: { name: { type: 'string', description: '组织名' }, type: { type: 'string', description: '类型' }, description: { type: 'string', description: '描述' } } },
+    { name: 'update_organization', description: '修改组织（需用户确认）', params: { entityId: { type: 'string', description: '组织ID' }, name: { type: 'string', description: '新名称' }, type: { type: 'string', description: '新类型' }, description: { type: 'string', description: '新描述' } } },
+    { name: 'delete_organization', description: '删除组织（需用户确认）', params: { entityId: { type: 'string', description: '组织ID' } } },
+    { name: 'create_relationship', description: '创建角色关系（需用户确认）', params: { fromCharacterId: { type: 'string', description: '源角色ID' }, toCharacterId: { type: 'string', description: '目标角色ID' }, type: { type: 'string', description: '关系类型' }, description: { type: 'string', description: '描述' } } },
+    { name: 'update_inspiration', description: '修改灵感卡片（需用户确认）', params: { entityId: { type: 'string', description: '卡片ID' }, title: { type: 'string', description: '新标题' }, content: { type: 'string', description: '新内容' } } },
+    { name: 'delete_inspiration', description: '删除灵感卡片（需用户确认）', params: { entityId: { type: 'string', description: '卡片ID' } } },
+    { name: 'update_thread', description: '修改剧情线索（需用户确认）', params: { entityId: { type: 'string', description: '线索ID' }, title: { type: 'string', description: '新标题' }, description: { type: 'string', description: '新描述' }, status: { type: 'string', description: '状态: open/resolved' } } },
+    { name: 'delete_thread', description: '删除剧情线索（需用户确认）', params: { entityId: { type: 'string', description: '线索ID' } } },
+    { name: 'resolve_thread', description: '收尾剧情线索（需用户确认）', params: { entityId: { type: 'string', description: '线索ID' } } },
+  ]
+
+  return TOOL_DEFS.map((def) => ({
+    definition: {
+      name: def.name,
+      description: def.description,
+      inputSchema: {
+        type: 'object' as const,
+        properties: def.params as Record<string, unknown>,
+        required: Object.keys(def.params)
+      }
+    },
+    handler: async (args: Record<string, unknown>, _ctx: { signal: AbortSignal; projectId: string }) => {
+      const toolUseId = `dt-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+      return new Promise((resolve) => {
+        pendingToolCalls.set(toolUseId, {
+          resolve: (r) => resolve(r as { content: string; isError?: boolean }),
+          reject: (e) => resolve({ content: e.message, isError: true })
+        })
+        setTimeout(() => {
+          if (pendingToolCalls.has(toolUseId)) {
+            pendingToolCalls.delete(toolUseId)
+            resolve({ content: '工具调用超时（30s），渲染侧未响应', isError: true })
+          }
+        }, 30000)
+        const win = BrowserWindow.getAllWindows()[0]
+        if (win && !win.isDestroyed()) {
+          win.webContents.send('characterarc:ai-delegated-tool-call', { streamId, toolUseId, toolName: def.name, args })
+        }
+      })
+    }
+  }))
+}
+
+/** 渲染侧回传工具执行结果 */
+function handleToolResult(streamId: string, toolUseId: string, result: unknown, isError: boolean): void {
+  const pending = pendingToolCalls.get(toolUseId)
+  if (!pending) return
+  pendingToolCalls.delete(toolUseId)
+  if (isError) {
+    pending.reject(new Error(typeof result === 'string' ? result : '工具执行失败'))
+  } else {
+    pending.resolve(result)
+  }
+}
 
 /**
  * 非流式任务的 AbortController（按 clientTaskId 索引）。
@@ -102,12 +183,14 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
       activeAiStreams.set(streamId, controller)
 
       const settings = payload.settings as AppSettings
-      const useAgentPath = payload.task === 'chapter-first-draft' && providerSupportsTools(settings)
+      const useAgentPath = (payload.task === 'chapter-first-draft' || payload.task === 'global-assistant') && providerSupportsTools(settings)
+      const isGlobalAssistant = payload.task === 'global-assistant'
 
       let streamedContent = ''
       void (async () => {
         try {
           if (useAgentPath) {
+            const extraTools = isGlobalAssistant ? createDelegatingTools(streamId) : undefined
             const result = await runStreamingAgentTask(
               payload,
               {
@@ -139,11 +222,10 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
                 }
               },
               controller.signal,
-              knowledgeContext
+              knowledgeContext,
+              extraTools
             )
-            if (result.meta.projectId) {
-              deps!.emitAiRunEvent({ projectId: result.meta.projectId, meta: { id: randomUUID(), ...result.meta } })
-            }
+            deps!.emitAiRunEvent({ projectId: result.meta.projectId || 'global', meta: { id: randomUUID(), ...result.meta } })
             if (!event.sender.isDestroyed()) {
               event.sender.send('characterarc:ai-stream-event', {
                 streamId,
@@ -166,9 +248,7 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
               controller.signal,
               knowledgeContext
             )
-            if (result.meta.projectId) {
-              deps!.emitAiRunEvent({ projectId: result.meta.projectId, meta: { id: randomUUID(), ...result.meta } })
-            }
+            deps!.emitAiRunEvent({ projectId: result.meta.projectId || 'global', meta: { id: randomUUID(), ...result.meta } })
             if (!event.sender.isDestroyed()) {
               event.sender.send('characterarc:ai-stream-event', {
                 streamId,
@@ -228,6 +308,9 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
       const knowledgeContext = retrieveKnowledgeContext(payload, deps!.getLatestWorkspaceSnapshot() as Parameters<typeof retrieveKnowledgeContext>[1])
       activeAiStreams.set(streamId, controller)
 
+      const isGlobalAssistant = payload.task === 'global-assistant'
+      const extraTools = isGlobalAssistant ? createDelegatingTools(streamId) : undefined
+
       let streamedContent = ''
       void (async () => {
         try {
@@ -262,11 +345,10 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
               }
             },
             controller.signal,
-            knowledgeContext
+            knowledgeContext,
+            extraTools
           )
-          if (result.meta.projectId) {
-            deps!.emitAiRunEvent({ projectId: result.meta.projectId, meta: { id: randomUUID(), ...result.meta } })
-          }
+          deps!.emitAiRunEvent({ projectId: result.meta.projectId || 'global', meta: { id: randomUUID(), ...result.meta } })
           if (!event.sender.isDestroyed()) {
             event.sender.send('characterarc:ai-stream-event', { streamId, type: 'done', content: streamedContent, result: result.result })
           }
@@ -443,5 +525,10 @@ export function registerAiIpcHandlers(injectedDeps: AiIpcDeps): void {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : '状态补录失败' }
     }
+  })
+
+  // ── 代理工具结果回传（渲染侧 → 主进程）──
+  ipcMain.handle('characterarc:ai-submit-tool-result', async (_event, payload: { streamId: string; toolUseId: string; result: unknown; isError: boolean }) => {
+    handleToolResult(payload.streamId, payload.toolUseId, payload.result, payload.isError)
   })
 }

@@ -72,10 +72,16 @@ contextBridge.exposeInMainWorld('characterArc', {
   onAiStreamEvent: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
     ipcRenderer.on('characterarc:ai-stream-event', listener)
-    return () => {
-      ipcRenderer.removeListener('characterarc:ai-stream-event', listener)
-    }
+    return () => { ipcRenderer.removeListener('characterarc:ai-stream-event', listener) }
   },
+  /** 监听代理工具调用（主进程→渲染侧），返回取消监听的清理函数 */
+  onDelegatedToolCall: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
+    ipcRenderer.on('characterarc:ai-delegated-tool-call', listener)
+    return () => { ipcRenderer.removeListener('characterarc:ai-delegated-tool-call', listener) }
+  },
+  /** 渲染侧回传工具执行结果 */
+  submitToolResult: (payload: unknown) => ipcRenderer.invoke('characterarc:ai-submit-tool-result', toIpcPayload(payload)),
   /** 监听 AI 运行记录事件 */
   onAiRunEvent: (callback: (payload: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload)

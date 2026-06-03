@@ -53,7 +53,8 @@ export async function runStreamingAgentTask(
   task: AiTaskPayload,
   handlers: AiAgentStreamHandlers,
   signal: AbortSignal,
-  knowledgeContext?: AiTaskKnowledgeContext
+  knowledgeContext?: AiTaskKnowledgeContext,
+  extraTools?: Array<import('./tools/types').Tool>
 ): Promise<AiTaskResponse> {
   const settings = normalizeSettings(task.settings)
   validateSettings(settings)
@@ -140,6 +141,39 @@ export async function runStreamingAgentTask(
     '- 如果用户的意图不明确（比如只是问"怎么改比较好"），可以先给建议；但一旦用户确认或要求执行，立即使用工具修改。'
   ].join('\n')
 
+  const globalAssistantToolsBlock = task.task === 'global-assistant'
+    ? [
+        '',
+        '## 全局创作工具',
+        '',
+        '你可以使用以下工具直接管理项目资产。所有写操作（create/update/delete）会生成变更提案，需用户确认后才生效：',
+        '',
+        '**读取工具**（直接返回数据）：',
+        '- `list_characters` / `list_worldview` / `list_outline` / `list_inspirations` / `list_plot_threads` / `list_organizations` / `list_relationships` — 列出各类实体摘要',
+        '- `read_entity` — 读取指定实体的完整详情',
+        '',
+        '**写入工具**（需用户确认）：',
+        '- `create_character` / `update_character` / `delete_character` — 管理角色',
+        '- `create_worldview` / `update_worldview` / `delete_worldview` — 管理世界观',
+        '- `create_outline` / `update_outline` / `delete_outline` — 管理大纲',
+        '- `create_inspiration` / `update_inspiration` / `delete_inspiration` — 管理灵感',
+        '- `create_thread` / `update_thread` / `resolve_thread` — 管理剧情线索',
+        '- `create_organization` / `update_organization` / `delete_organization` — 管理组织',
+        '- `create_relationship` — 管理角色关系',
+        '- `update_inspiration` / `delete_inspiration` — 修改/删除灵感',
+        '- `update_thread` / `delete_thread` / `resolve_thread` — 管理线索',
+        '',
+        '**知识库工具**（直接写入）：',
+        '- `knowledge_save_document` / `knowledge_update_document` / `knowledge_delete_document`',
+        '',
+        '**使用规则**：',
+        '- 用户要求创建角色/世界观/大纲等实体时，优先使用对应的 create_* 工具，不要只用 knowledge_save_document',
+        '- 用户要求修改或删除时，先用 list_* 读取现有数据，再用 update_*/delete_* 操作',
+        '- 知识库文档适合存储长篇设定、角色卡、场景分析等，但结构化实体（角色图鉴、世界观条目等）应使用专门的工具',
+        '- 每次操作后简要说明做了什么',
+      ].join('\n')
+    : ''
+
   const chapterDraftRules = task.task === 'chapter-first-draft'
     ? [
         '',
@@ -153,7 +187,7 @@ export async function runStreamingAgentTask(
       ].join('\n')
     : ''
 
-  const systemPrompt = `${prompt.system}${requiredSkillBlock}${chapterToolsBlock}${contextModulesBlock}\n${buildSkillIndex(optionalSkillDefs)}\n${buildAgentBehaviorRules()}${chapterDraftRules}${skillUsageHints}`
+  const systemPrompt = `${prompt.system}${requiredSkillBlock}${globalAssistantToolsBlock}${chapterToolsBlock}${contextModulesBlock}\n${buildSkillIndex(optionalSkillDefs)}\n${buildAgentBehaviorRules()}${chapterDraftRules}${skillUsageHints}`
 
   const skillTools = createSkillTools({
     resolveSkill: (id) => getSkillById(id, projectId || undefined),
@@ -173,7 +207,7 @@ export async function runStreamingAgentTask(
 
   const projectDataTools = createProjectDataTools()
 
-  const registry = [...skillTools, ...knowledgeTools, ...chapterTools, ...projectDataTools]
+  const registry = [...skillTools, ...knowledgeTools, ...chapterTools, ...projectDataTools, ...(extraTools ?? [])]
 
   logPrompt('AGENT_STREAM', settings, { system: systemPrompt, user: prompt.user }, task.task, usedSkillIds)
   const requestStartedAt = Date.now()

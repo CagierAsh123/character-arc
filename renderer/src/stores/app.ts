@@ -73,9 +73,6 @@ export const useAppStore = defineStore('app', () => {
   const knowledgeDocuments = ref<KnowledgeDocument[]>(stored.knowledgeDocuments ?? [])
   const referenceWorks = ref<ReferenceWorkItem[]>(stored.referenceWorks ?? [])
 
-  // Global AI session storage: projectId → { sessionId → serialized messages }
-  const globalAiSessions = ref<Record<string, Record<string, string>>>({})
-
   // ═══ Persistence ═══
   function serializeWorkspaceState(): StoredState {
     return {
@@ -365,43 +362,6 @@ export const useAppStore = defineStore('app', () => {
     schedulePersist('fast')
   }
 
-  // ═══ Global AI Session Persistence ═══
-  const MAX_GLOBAL_AI_SESSIONS = 100
-
-  function saveGlobalAiSession(projectId: string, sessionId: string, messagesJson: string): void {
-    const projectSessions = { ...(globalAiSessions.value[projectId] || {}) }
-    // Keep max 20 sessions per project
-    const keys = Object.keys(projectSessions)
-    if (keys.length >= MAX_GLOBAL_AI_SESSIONS && !projectSessions[sessionId]) {
-      delete projectSessions[keys[0]]
-    }
-    projectSessions[sessionId] = messagesJson
-    globalAiSessions.value = { ...globalAiSessions.value, [projectId]: projectSessions }
-  }
-
-  function loadGlobalAiSession(projectId: string, sessionId: string): string | null {
-    return globalAiSessions.value[projectId]?.[sessionId] || null
-  }
-
-  function listGlobalAiSessions(projectId: string): Array<{ id: string; title: string; updatedAt: string }> {
-    const projectSessions = globalAiSessions.value[projectId] || {}
-    return Object.entries(projectSessions).map(([id, json]) => {
-      try {
-        const msgs = JSON.parse(json) as Array<{ role: string; content: string; createdAt: number }>
-        const title = msgs.find(m => m.role === 'user')?.content?.slice(0, 40) || '空对话'
-        const lastMsg = msgs[msgs.length - 1]
-        const updatedAt = lastMsg ? new Date(lastMsg.createdAt).toISOString() : ''
-        return { id, title, updatedAt }
-      } catch { return { id, title: '（损坏）', updatedAt: '' } }
-    }).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-  }
-
-  function deleteGlobalAiSession(projectId: string, sessionId: string): void {
-    const projectSessions = { ...(globalAiSessions.value[projectId] || {}) }
-    delete projectSessions[sessionId]
-    globalAiSessions.value = { ...globalAiSessions.value, [projectId]: projectSessions }
-  }
-
   // ═══ Event Listeners & Watchers ═══
   window.characterArc.onWorkspaceSync(handleRemoteWorkspaceSync)
   window.characterArc.onAiRunEvent(handleAiRunEvent)
@@ -465,7 +425,6 @@ export const useAppStore = defineStore('app', () => {
     dismissAiTask: aiTasks.dismissAiTask, cancelAiTask: aiTasks.cancelAiTask,
     getChapterStateWarnings, dismissChapterStateWarnings,
     getChapterPostGenerationIssues, dismissChapterPostGenerationIssues,
-    saveGlobalAiSession, loadGlobalAiSession, listGlobalAiSessions, deleteGlobalAiSession,
     // knowledge is spread via ...knowledgeCrud above
     mergeKnowledgeDocuments: knowledgeCrud.mergeKnowledgeDocuments,
     removeKnowledgeDocuments: knowledgeCrud.removeKnowledgeDocuments,

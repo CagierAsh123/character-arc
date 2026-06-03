@@ -210,6 +210,8 @@ declare global {
       onAiRunEvent: (callback: (payload: CharacterArcAiRunEventPayload) => void) => () => void
       onChapterStateWarnings: (callback: (payload: CharacterArcChapterStateWarningsPayload) => void) => () => void
       onChapterPostGenerationIssues: (callback: (payload: CharacterArcChapterPostGenerationIssuesPayload) => void) => () => void
+      onDelegatedToolCall: (callback: (payload: { streamId: string; toolUseId: string; toolName: string; args: Record<string, unknown> }) => void) => () => void
+      submitToolResult: (payload: { streamId: string; toolUseId: string; result: unknown; isError: boolean }) => Promise<{ success: boolean; error?: string }>
       spiralBootstrap: (payload: unknown) => Promise<{
         success: boolean
         result?: import('@/features/wizard/projectSeed').SpiralBootstrapResult

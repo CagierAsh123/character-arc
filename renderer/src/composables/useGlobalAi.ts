@@ -33,8 +33,9 @@ export function useGlobalAi() {
   let streamingMsgId: string | null = null
   let removeListener: (() => void) | null = null
 
-  // ═══ Session Management ═══
+  // ═══ Session Management (IPC → SQLite, same as chapter AI) ═══
   const currentSessionId = ref('')
+  const sessions = ref<Array<{ id: string; title: string; created_at: string; updated_at: string }>>([])
 
   function currentProjectId(): string {
     return store.selectedProjectId || store.currentProject?.id || ''
@@ -44,61 +45,112 @@ export function useGlobalAi() {
     return `gai-session-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   }
 
+  function deriveTitle(): string {
+    const firstUser = messages.value.find(m => m.role === 'user')
+    if (!firstUser) return '新对话'
+    return firstUser.content.slice(0, 30) || '新对话'
+  }
+
   function newSession(): void {
     currentSessionId.value = generateSessionId()
     messages.value = []
     for (const key of Object.keys(changeStatuses)) delete changeStatuses[key]
   }
 
-  function loadSession(sessionId?: string): void {
+  async function refreshSessions(): Promise<void> {
     const pid = currentProjectId()
     if (!pid) return
+    try {
+      const res = await window.characterArc.listSessions(pid)
+      if (res.success && res.result) {
+        // Only show global AI sessions (not chapter assistant sessions)
+        sessions.value = res.result.filter(s => s.id.startsWith('gai-session-'))
+      }
+    } catch { /* ignore */ }
+  }
+
+  async function loadSession(sessionId?: string): Promise<void> {
     const sid = sessionId || currentSessionId.value
     if (!sid) { newSession(); return }
-    const saved = store.loadGlobalAiSession(pid, sid)
-    if (saved) {
-      try {
-        messages.value = JSON.parse(saved) as GlobalAiMessage[]
+    try {
+      const res = await window.characterArc.loadSession(sid)
+      if (res.success && res.result?.messages) {
+        messages.value = res.result.messages as GlobalAiMessage[]
         currentSessionId.value = sid
-      } catch { newSession() }
-    } else {
-      newSession()
-    }
+        restoreChangeStatuses()
+        return
+      }
+    } catch { /* ignore */ }
+    newSession()
   }
 
-  function switchToSession(sessionId: string): void {
-    const pid = currentProjectId()
-    if (!pid) return
-    const saved = store.loadGlobalAiSession(pid, sessionId)
-    if (saved) {
-      try {
-        messages.value = JSON.parse(saved) as GlobalAiMessage[]
+  async function switchToSession(sessionId: string): Promise<void> {
+    try {
+      const res = await window.characterArc.loadSession(sessionId)
+      if (res.success && res.result?.messages) {
+        messages.value = res.result.messages as GlobalAiMessage[]
         currentSessionId.value = sessionId
         for (const key of Object.keys(changeStatuses)) delete changeStatuses[key]
-      } catch { /* ignore */ }
+        restoreChangeStatuses()
+      }
+    } catch { /* ignore */ }
+  }
+
+  // Persist confirm/reject status inside proposedChanges
+  function restoreChangeStatuses(): void {
+    for (const key of Object.keys(changeStatuses)) delete changeStatuses[key]
+    for (const msg of messages.value) {
+      if (msg.proposedChanges) {
+        for (const pc of msg.proposedChanges) {
+          const status = (pc as any)._status as ChangeStatus | undefined
+          if (status && status !== 'pending') changeStatuses[pc.entityId] = status
+        }
+      }
     }
   }
 
-  function listSessions(): Array<{ id: string; title: string; updatedAt: string }> {
-    return store.listGlobalAiSessions(currentProjectId())
+  async function saveCurrentSession(): Promise<void> {
+    const pid = currentProjectId()
+    const sid = currentSessionId.value
+    if (!pid || !sid || messages.value.length === 0) return
+    // JSON round-trip to strip Vue proxies before IPC
+    // Also embed confirm status so it survives save/load
+    const clipped = JSON.parse(JSON.stringify(
+      messages.value.slice(-MAX_MESSAGES).map(m => ({
+        id: m.id, role: m.role, content: m.content, createdAt: m.createdAt,
+        isError: m.isError, toolCalls: m.toolCalls,
+        proposedChanges: m.proposedChanges?.map(pc => ({
+          ...pc, _status: changeStatuses[pc.entityId] || 'pending'
+        }))
+      }))
+    ))
+    try {
+      const res = await window.characterArc.saveSession({
+        id: sid,
+        projectId: pid,
+        title: deriveTitle(),
+        messages: clipped
+      })
+      if (!res.success) console.error('[GlobalAI] save failed:', res.error)
+      await refreshSessions()
+    } catch (e) {
+      console.error('[GlobalAI] save exception:', e)
+    }
   }
 
-  function deleteSession(sessionId: string): void {
-    store.deleteGlobalAiSession(currentProjectId(), sessionId)
-    if (currentSessionId.value === sessionId) newSession()
+  async function deleteSession(sessionId: string): Promise<void> {
+    try {
+      await window.characterArc.deleteSession(sessionId)
+      await refreshSessions()
+      if (currentSessionId.value === sessionId) newSession()
+    } catch { /* ignore */ }
   }
 
-  // ═══ Persistence ═══
+  // ═══ Persistence (debounced save to SQLite via IPC) ═══
   let saveTimeout: number | null = null
   function scheduleSave(): void {
     if (saveTimeout !== null) clearTimeout(saveTimeout)
-    saveTimeout = window.setTimeout(() => {
-      const pid = currentProjectId()
-      const sid = currentSessionId.value
-      if (!pid || !sid) return
-      const clipped = messages.value.slice(-MAX_MESSAGES)
-      store.saveGlobalAiSession(pid, sid, JSON.stringify(clipped))
-    }, 500)
+    saveTimeout = window.setTimeout(() => { saveCurrentSession() }, 500)
   }
 
   watch(messages, () => scheduleSave(), { deep: true })
@@ -132,6 +184,36 @@ export function useGlobalAi() {
       return
     }
 
+    if (payload.type === 'tool_use_start') {
+      // Show tool call card immediately in the streaming message
+      const msg = messages.value.find(m => m.id === streamingMsgId)
+      if (msg) {
+        if (!msg.toolCalls) msg.toolCalls = []
+        msg.toolCalls = [...msg.toolCalls, {
+          call: { id: payload.toolUseId, name: payload.toolName, args: payload.args },
+          result: { callId: payload.toolUseId, success: true, data: '执行中...' }
+        }]
+      }
+      agentStatus.value = `调用工具：${payload.toolName}`
+      return
+    }
+
+    if (payload.type === 'tool_result') {
+      const msg = messages.value.find(m => m.id === streamingMsgId)
+      if (msg && msg.toolCalls) {
+        const idx = msg.toolCalls.findIndex(tc => tc.call.id === payload.toolUseId)
+        if (idx >= 0) {
+          msg.toolCalls = msg.toolCalls.map(tc =>
+            tc.call.id === payload.toolUseId
+              ? { ...tc, result: { callId: payload.toolUseId, success: !payload.isError, data: payload.content, error: payload.isError ? payload.content : undefined } }
+              : tc
+          )
+        }
+      }
+      agentStatus.value = ''
+      return
+    }
+
     if (payload.type === 'error') {
       const msg = messages.value.find(m => m.id === streamingMsgId)
       if (msg) {
@@ -147,16 +229,86 @@ export function useGlobalAi() {
     agentStatus.value = ''
     streamId = null
     streamingMsgId = null
+    // Save immediately after each AI response (same as chapter AI)
+    void saveCurrentSession().catch(() => {})
   }
+
+  // Delegated tool execution
+  let removeToolListener: (() => void) | null = null
 
   function registerStreamListener(): void {
     if (removeListener) return
     removeListener = window.characterArc.onAiStreamEvent(handleStreamEvent)
   }
 
+  function registerToolListener(): void {
+    if (removeToolListener) return
+    removeToolListener = window.characterArc.onDelegatedToolCall((payload) => {
+      const p = payload as { streamId: string; toolUseId: string; toolName: string; args: Record<string, unknown> }
+      if (p.streamId !== streamId) return
+
+      // Show tool call in the UI as "executing..."
+      const msg = messages.value.find(m => m.id === streamingMsgId)
+      if (msg) {
+        if (!msg.toolCalls) msg.toolCalls = []
+        msg.toolCalls = [...msg.toolCalls, {
+          call: { id: p.toolUseId, name: p.toolName, args: p.args },
+          result: { callId: p.toolUseId, success: true, data: '执行中...' }
+        }]
+      }
+      agentStatus.value = `执行工具：${p.toolName}`
+
+      const { execute } = useGlobalAiTools()
+      const execResult = execute({ id: p.toolUseId, name: p.toolName, args: p.args })
+
+      // Update the tool call card with the result
+      if (msg && msg.toolCalls) {
+        msg.toolCalls = msg.toolCalls.map(tc =>
+          tc.call.id === p.toolUseId
+            ? { ...tc, result: { callId: p.toolUseId, success: execResult.success, data: execResult.data, error: execResult.error } }
+            : tc
+        )
+      }
+
+      // Extract ProposedChange objects for confirm/reject cards
+      if (execResult.success && execResult.data && typeof execResult.data === 'object' && 'action' in (execResult.data as object)) {
+        const change = execResult.data as ProposedChange
+        if (!msg) return  // shouldn't happen
+        if (!msg.proposedChanges) msg.proposedChanges = []
+        msg.proposedChanges = [...msg.proposedChanges, change]
+        changeStatuses[change.entityId] = 'pending'
+      }
+
+      agentStatus.value = ''
+
+      // Submit result back to main process in ToolHandlerResult format
+      window.characterArc.submitToolResult({
+        streamId: p.streamId,
+        toolUseId: p.toolUseId,
+        result: {
+          content: execResult.success ? stringifyToolData(execResult.data) : (execResult.error || '工具执行失败'),
+          isError: !execResult.success
+        },
+        isError: !execResult.success
+      })
+    })
+  }
+
+  function stringifyToolData(data: unknown): string {
+    if (typeof data === 'string') return data
+    if (data && typeof data === 'object' && 'action' in (data as object)) {
+      // ProposedChange - format nicely
+      const c = data as ProposedChange
+      return `[提议: ${c.action === 'create' ? '创建' : c.action === 'update' ? '修改' : '删除'} ${c.entityType}] ${c.label}\n${JSON.stringify(c.after || c.before, null, 2)}`
+    }
+    return JSON.stringify(data, null, 2)
+  }
+
   function unregisterStreamListener(): void {
     removeListener?.()
     removeListener = null
+    removeToolListener?.()
+    removeToolListener = null
   }
 
   // ═══ Send ═══
@@ -164,6 +316,7 @@ export function useGlobalAi() {
     if (!prompt.trim() || isResponding.value) return
 
     registerStreamListener()
+    registerToolListener()
 
     // Add user message
     messages.value = [...messages.value, {
@@ -188,13 +341,21 @@ export function useGlobalAi() {
         .filter(m => m.content)
         .map(m => ({ role: m.role, content: m.content }))
 
-      const result = await window.characterArc.startAiStream(toIpcPayload({
+      const supportsTools = settings.provider !== 'deepseek'  // DeepSeek has limited tool support
+      const startFn = supportsTools ? window.characterArc.startAiAgentStream : window.characterArc.startAiStream
+
+      const pid = currentProjectId()
+      const result = await startFn(toIpcPayload({
         task: 'global-assistant',
         settings,
         context: {
+          projectId: pid,
           systemPrompt: systemPrompt || '',
           userPrompt: prompt.trim(),
-          recentMessages
+          recentMessages,
+          projectTitle: store.currentProject?.title || '',
+          projectGenre: store.currentProject?.genre || '',
+          projectWordCount: store.currentProject?.wordCount || ''
         }
       }))
 
@@ -277,12 +438,17 @@ export function useGlobalAi() {
     return changeStatuses[entityId] || 'pending'
   }
 
-  // Cleanup
-  onBeforeUnmount(() => unregisterStreamListener())
+  // Cleanup — flush pending save immediately
+  onBeforeUnmount(() => {
+    if (saveTimeout !== null) clearTimeout(saveTimeout)
+    saveCurrentSession()
+    unregisterStreamListener()
+  })
 
   return {
     messages, isResponding, agentStatus, send, stop, resetMessages,
     changeStatuses, applyChange, rejectChange, applyAllChanges, getChangeStatus,
-    loadSession, newSession, switchToSession, listSessions, deleteSession, currentSessionId
+    loadSession, newSession, switchToSession, refreshSessions, saveCurrentSession,
+    deleteSession, currentSessionId, sessions
   }
 }

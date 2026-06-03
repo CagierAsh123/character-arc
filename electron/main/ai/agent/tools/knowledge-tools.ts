@@ -151,5 +151,89 @@ export function createKnowledgeTools(opts: KnowledgeToolFactoryOptions): Tool[] 
     }
   }
 
-  return [knowledgeSaveDocument]
+  const knowledgeUpdateDocument: Tool = {
+    definition: {
+      name: 'knowledge_update_document',
+      description: '更新知识库中已有文档的标题、内容、关键词或元数据。通过文档标题（title）精确匹配。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '要更新的文档标题（精确匹配）' },
+          newTitle: { type: 'string', description: '可选，新标题' },
+          content: { type: 'string', description: '可选，新内容' },
+          summary: { type: 'string', description: '可选，新摘要' },
+          keywords: { type: 'array', items: { type: 'string' }, description: '可选，新关键词' },
+          metadata: { type: 'object', description: '可选，新元数据', additionalProperties: true }
+        },
+        required: ['title']
+      }
+    },
+    async handler(input) {
+      try {
+        const title = String(input.title ?? '').trim()
+        if (!title) return err('参数 title 不能为空')
+        if (savedCount >= maxDocuments) return err(`已达本次任务的落库上限 ${maxDocuments} 份。`)
+
+        const newTitle = typeof input.newTitle === 'string' ? input.newTitle.trim() : undefined
+        const content = typeof input.content === 'string' ? input.content.trim() : undefined
+        const summary = typeof input.summary === 'string' ? input.summary.trim() : undefined
+        const keywords = Array.isArray(input.keywords) ? input.keywords.map((k: unknown) => String(k).trim()).filter(Boolean).slice(0, 12) : undefined
+        const metadataInput = input.metadata && typeof input.metadata === 'object' && !Array.isArray(input.metadata)
+          ? (input.metadata as Record<string, unknown>) : undefined
+
+        const draft: AiKnowledgeDocumentDraft = {
+          title: newTitle || title,
+          sourceType: 'canon-fact',
+          sourceLabel: opts.defaultSourceLabel ?? '',
+          content: content || '(已更新)',
+          summary: summary || '',
+          ...(keywords ? { keywords } : {}),
+          ...(metadataInput ? { metadata: metadataInput } : {})
+        }
+
+        opts.collectDocument(draft)
+        savedCount += 1
+        return ok(`已更新知识文档：${title}${newTitle && newTitle !== title ? ` → ${newTitle}` : ''}。`)
+      } catch (error) {
+        return err(error instanceof Error ? error.message : String(error))
+      }
+    }
+  }
+
+  const knowledgeDeleteDocument: Tool = {
+    definition: {
+      name: 'knowledge_delete_document',
+      description: '删除知识库中的指定文档。通过文档标题（title）精确匹配。删除操作不可撤销。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: '要删除的文档标题（精确匹配）' }
+        },
+        required: ['title']
+      }
+    },
+    async handler(input) {
+      try {
+        const title = String(input.title ?? '').trim()
+        if (!title) return err('参数 title 不能为空')
+
+        const draft: AiKnowledgeDocumentDraft = {
+          title,
+          sourceType: 'canon-fact',
+          sourceLabel: opts.defaultSourceLabel ?? '',
+          content: '',
+          summary: `[已删除] ${title}`,
+          metadata: { deleted: true }
+        }
+
+        opts.collectDocument(draft)
+        savedCount += 1
+        return ok(`已标记删除知识文档：${title}。`)
+      } catch (error) {
+        return err(error instanceof Error ? error.message : String(error))
+      }
+    }
+  }
+
+  return [knowledgeSaveDocument, knowledgeUpdateDocument, knowledgeDeleteDocument]
 }

@@ -33,6 +33,11 @@ const isBackfillingState = ref(false)
 const backfillProgress = ref<CharacterArcBackfillStateProgressPayload | null>(null)
 const selectedAuditReport = ref<KnowledgeDocument | null>(null)
 
+const sourceTypeLabel: Record<string, string> = {
+  'workflow-document': '流程', 'chapter-summary': '摘要', 'canon-fact': '事实',
+  'reference-summary': '拆书', 'reference-chunk': '拆书'
+}
+
 const cleanupBackfillProgress = window.characterArc.onBackfillStateProgress((payload) => {
   backfillProgress.value = payload
 })
@@ -48,6 +53,17 @@ const auditReports = computed(() =>
 )
 
 const latestAuditReport = computed(() => auditReports.value[0] ?? null)
+
+/** All project-scoped knowledge documents (non-reference, non-audit) */
+const projectDocuments = computed(() =>
+  appStore.knowledgeDocuments
+    .filter((doc) =>
+      doc.sourceType === 'workflow-document' ||
+      doc.sourceType === 'chapter-summary' ||
+      (doc.sourceType === 'canon-fact' && doc.sourceLabel !== 'story-deep-audit')
+    )
+    .sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''))
+)
 
 const chapterCount = computed(() => appStore.chapters.length)
 const validChapterCount = computed(
@@ -169,9 +185,6 @@ function runStateBackfill(): void {
 }
 
 function deleteAuditReport(report: KnowledgeDocument): void {
-  const project = appStore.currentProject
-  if (!project) return
-
   dialog.warning({
     title: '删除审计报告',
     content: `确认删除「${report.title}」吗？此操作无法撤销。`,
@@ -179,10 +192,22 @@ function deleteAuditReport(report: KnowledgeDocument): void {
     negativeText: '取消',
     onPositiveClick: () => {
       appStore.removeKnowledgeDocuments([report.id])
-      if (selectedAuditReport.value?.id === report.id) {
-        selectedAuditReport.value = null
-      }
-      message.success('已删除审计报告')
+      if (selectedAuditReport.value?.id === report.id) selectedAuditReport.value = null
+      message.success('已删除')
+    }
+  })
+}
+
+function deleteDoc(doc: KnowledgeDocument): void {
+  dialog.warning({
+    title: '删除文档',
+    content: `确认删除「${doc.title}」吗？此操作无法撤销。`,
+    positiveText: '删除',
+    negativeText: '取消',
+    onPositiveClick: () => {
+      appStore.removeKnowledgeDocuments([doc.id])
+      if (selectedAuditReport.value?.id === doc.id) selectedAuditReport.value = null
+      message.success('已删除')
     }
   })
 }
@@ -299,6 +324,44 @@ function deleteAuditReport(report: KnowledgeDocument): void {
             <n-button size="tiny" quaternary type="error" @click.stop="deleteAuditReport(report)">删除</n-button>
           </template>
           <p class="pk-history-summary">{{ report.summary || report.content.slice(0, 160) }}</p>
+        </n-card>
+      </n-space>
+    </section>
+
+    <section class="pk-history">
+      <div class="pk-history-head">
+        <div class="pk-history-title">
+          <FileCheck2 :size="16" />
+          <strong>项目文档</strong>
+          <n-tag size="tiny" :bordered="false">{{ projectDocuments.length }} 份</n-tag>
+        </div>
+      </div>
+
+      <n-empty v-if="!projectDocuments.length" description="还没有项目知识文档。AI 生成的流程文档、章节摘要和设定事实会出现在这里。" />
+      <n-space v-else vertical size="small">
+        <n-card
+          v-for="doc in projectDocuments"
+          :key="doc.id"
+          size="small"
+          hoverable
+          class="pk-history-item"
+          @click="selectedAuditReport = doc"
+        >
+          <template #header>
+            <div class="pk-history-item-title">
+              <strong>{{ doc.title }}</strong>
+              <n-tag size="tiny" :bordered="false" :type="doc.sourceType === 'workflow-document' ? 'info' : doc.sourceType === 'chapter-summary' ? 'success' : 'warning'">
+                {{ sourceTypeLabel[doc.sourceType] || doc.sourceType }}
+              </n-tag>
+              <n-tag size="tiny" :bordered="false" type="info">
+                {{ formatKnowledgeDateTime(doc.createdAt) }}
+              </n-tag>
+            </div>
+          </template>
+          <template #header-extra>
+            <n-button size="tiny" quaternary type="error" @click.stop="deleteDoc(doc)">删除</n-button>
+          </template>
+          <p class="pk-history-summary">{{ doc.summary || doc.content.slice(0, 160) }}</p>
         </n-card>
       </n-space>
     </section>

@@ -33,6 +33,7 @@ import worldviewEnhance from './worldview-enhance'
 import outlineEnhance from './outline-enhance'
 import relationEnhance from './relation-enhance'
 import globalAssistant from './global-assistant'
+import globalAssistantProposal from './global-assistant-proposal'
 
 /** 任务处理器注册表，按任务名称映射 */
 const TASK_REGISTRY = new Map<AiTaskName, TaskHandler>()
@@ -77,6 +78,7 @@ register(worldviewEnhance)
 register(outlineEnhance)
 register(relationEnhance)
 register(globalAssistant)
+register(globalAssistantProposal)
 
 /**
  * 根据任务名称获取对应的任务处理器

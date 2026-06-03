@@ -74,6 +74,7 @@ export type AiTaskName =
   | 'outline-enhance'
   | 'relation-enhance'
   | 'global-assistant'
+  | 'global-assistant-proposal'
 
 /**
  * AI 运行时注入 prompt 的知识条目。
@@ -387,6 +388,25 @@ export type AiTaskResult =
   | SpiralSeedResult
   | SpiralExpandResult
   | SpiralValidateResult
+  | GlobalAssistantResult
+  | GlobalAssistantProposalResult
+
+/** 项目级全局助手回复结果 */
+export type GlobalAssistantResult = {
+  content: string
+}
+
+export type GlobalAssistantProposalResult = {
+  summary: string
+  constraintCreates: Array<{ title: string; content: string; scope: string; reason: string; keywords: string[] }>
+  worldviewCreates: WorldviewResult[]
+  worldviewUpdates: Array<{ matchTitle: string; reason: string; type?: string; title?: string; content?: string }>
+  characterCreates: CharacterResult[]
+  characterUpdates: Array<{ matchName: string; reason: string; name?: string; role?: string; description?: string; tags?: string[] }>
+  outlineCreates: OutlineResult[]
+  outlineUpdates: Array<{ matchTitle: string; reason: string; title?: string; wordTarget?: string; conflict?: string; summary?: string }>
+  notes: string[]
+}
 
 /** AI 任务的完整响应：结果 + 运行元数据 */
 export type AiTaskResponse = {
